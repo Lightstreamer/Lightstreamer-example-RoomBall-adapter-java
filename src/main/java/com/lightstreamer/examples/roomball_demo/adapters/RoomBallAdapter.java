@@ -20,17 +20,21 @@ package com.lightstreamer.examples.roomball_demo.adapters;
 
 import java.io.File;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import com.lightstreamer.interfaces.data.DataProviderException;
-import com.lightstreamer.interfaces.data.FailureException;
-import com.lightstreamer.interfaces.data.ItemEventListener;
-import com.lightstreamer.interfaces.data.SmartDataProvider;
-import com.lightstreamer.interfaces.data.SubscriptionException;
+import com.lightstreamer.adapter.common.InitException;
+import com.lightstreamer.adapter.common.Mode;
+import com.lightstreamer.adapter.data.DataAdapter;
+import com.lightstreamer.adapter.data.ItemListener;
+import com.lightstreamer.adapter.data.ItemManager;
+import com.lightstreamer.adapter.data.SubscriptionException;
 
-public class RoomBallAdapter implements SmartDataProvider, Publisher {
+public class RoomBallAdapter implements DataAdapter, Publisher {
 
     static final String ROOM_DEMO_LOGGER_NAME = "LS_demos_Logger.RoomBallDemo";
     
@@ -43,34 +47,27 @@ public class RoomBallAdapter implements SmartDataProvider, Publisher {
     private Logger logger;
 
     /**
-     * The listener of updates set by Lightstreamer Kernel.
+     * The active PlayersListItemManager for the "Players_list" item.
      */
-    private volatile ItemEventListener listener = null;
+    private volatile PlayersListItemManager playerListManager = null;
 
     /**
-     * Flag indicating whether the item "Players_list" is subscribed or not
-     * It is not guarded by any lock to avoid to lock the call to
-     * listener.smartUpdate(..). If, due to a race condition, smartUpdate is
-     * called after an unsubscribe, the server will ignore the update, and
-     * may log a warning.
+     * Map of active BandwidthItemManagers, indexed by item name.
      */
-    volatile private boolean playerListSubscribed = false;
+    private final ConcurrentHashMap<String, BandwidthItemManager> bandManagers =
+            new ConcurrentHashMap<>();
 
     /**
      * The room where the players and the ball move
      */
     private Room room;
 
-    /**
-     * The handle received by subscription and used to send messages to.
-     */
-    private volatile Object playerListHandle = null;
+    private Map<String, String> initParams;
 
-    // Public Methods Implementing DataProvider Methods ------------------------
+    // Public Methods Implementing DataAdapter Methods -------------------------
 
     @Override
-    @SuppressWarnings("rawtypes")
-    public void init(Map params, File configDir) throws DataProviderException {
+    public void init(Map<String, String> params, File configDir) throws InitException {
 
         try {
             logger = LogManager.getLogger(ROOM_DEMO_LOGGER_NAME);
@@ -78,60 +75,118 @@ public class RoomBallAdapter implements SmartDataProvider, Publisher {
             System.out.println("Loggers failed to load: " + e);
         }
 
-        room = initRoom(params);
-
-        if (room == null) {
-            throw new DataProviderException("Room not ready!");
-        }
+        initParams = params;
         
         logger.debug("RoomAdapter start!");
     }
 
     @Override
-    public void setListener(ItemEventListener lstnr) {
-        if (listener == null) {
-            listener = lstnr;
+    public CompletionStage<ItemManager> getItemManager(String itemName) throws SubscriptionException {
+        if (itemName.equals(ITEM_NAME_PLAYERS_LIST)) {
+            return CompletableFuture.completedFuture(new PlayersListItemManager(itemName));
+        } else if (itemName.startsWith(ITEM_NAME_PREFIX_BAND)) {
+            return CompletableFuture.completedFuture(new BandwidthItemManager(itemName));
         }
+        CompletableFuture<ItemManager> f = new CompletableFuture<>();
+        f.completeExceptionally(new SubscriptionException("No such item: " + itemName));
+        return f;
     }
 
     @Override
-    public boolean isSnapshotAvailable(String itemName)  throws SubscriptionException {
-        if (itemName.startsWith(ITEM_NAME_PLAYERS_LIST)) {
+    public void shutdown() {
+    }
+
+    // Public Methods ---------------------------------------------------------
+
+    public void setRoom(Box2DRoom box2dRoom) {
+        box2dRoom.setPublisher(this);
+
+        if (initParams.containsKey(CFG_PARAM_FRAME_RATE)) {
+            logger.debug("frameRate configured: " + initParams.get(CFG_PARAM_FRAME_RATE));
+            box2dRoom.setFrameRate(Integer.parseInt(initParams.get(CFG_PARAM_FRAME_RATE)));
+        }
+
+        if (initParams.containsKey(CFG_PARAM_STEPS_PER_FRAME)) {
+            logger.debug("Steps per Frame configured: " + initParams.get(CFG_PARAM_STEPS_PER_FRAME));
+            box2dRoom.setStepsPerFrame(Integer.parseInt(initParams.get(CFG_PARAM_STEPS_PER_FRAME)));
+        }
+
+        room = box2dRoom;
+    }
+
+    // Inner ItemManager Classes -----------------------------------------------
+
+    private class PlayersListItemManager implements ItemManager {
+
+        private final String itemName;
+        private ItemListener listener;
+
+        PlayersListItemManager(String itemName) {
+            this.itemName = itemName;
+        }
+
+        @Override
+        public Mode getSupportedMode() {
+            return Mode.COMMAND;
+        }
+
+        @Override
+        public boolean isSnapshotAvailable() {
             return true;
         }
-        return false;
-    }
 
-    @Override
-    public void subscribe(String itemName, Object handle, boolean needsIterator) throws SubscriptionException,FailureException {
+        @Override
+        public CompletionStage<Void> subscribe(ItemListener listener) {
+            logger.debug("Subscribe request for '" + ITEM_NAME_PLAYERS_LIST + "'.");
+            this.listener = listener;
+            playerListManager = this;
+            room.start();
+            room.touchAllElements();
+            return CompletableFuture.completedFuture(null);
+        }
 
-         if (itemName.startsWith(ITEM_NAME_PLAYERS_LIST)) {
-             logger.debug("Subscribe request for '" + ITEM_NAME_PLAYERS_LIST + "'.");
-             playerListSubscribed = true;
-             playerListHandle = handle;
-             room.start();
-             room.touchAllElements();
-
-        } else if (itemName.startsWith(ITEM_NAME_PREFIX_BAND)) {
-            // Nothing to do.
+        @Override
+        public CompletionStage<Void> unsubscribe() {
+            logger.debug("Unsubscribe request for '" + itemName + "'.");
+            playerListManager = null;
+            this.listener = null;
+            room.stop();
+            return CompletableFuture.completedFuture(null);
         }
     }
 
-    @Override
-    public void subscribe(String itemName, boolean needsIterator)
-            throws SubscriptionException, FailureException {
-        // Never Called.
-    }
+    private class BandwidthItemManager implements ItemManager {
 
-    @Override
-    public void unsubscribe(String itemName) throws SubscriptionException, FailureException {
+        private final String itemName;
+        private ItemListener listener;
 
-        if (itemName.startsWith(ITEM_NAME_PLAYERS_LIST)) {
-            logger.debug("Unsubscribe request for '" + itemName + "'.");
-            playerListSubscribed = false;
-            room.stop();
-        } else if (itemName.startsWith(ITEM_NAME_PREFIX_BAND)) {
+        BandwidthItemManager(String itemName) {
+            this.itemName = itemName;
+        }
+
+        @Override
+        public Mode getSupportedMode() {
+            return Mode.MERGE;
+        }
+
+        @Override
+        public boolean isSnapshotAvailable() {
+            return false;
+        }
+
+        @Override
+        public CompletionStage<Void> subscribe(ItemListener listener) {
+            this.listener = listener;
+            bandManagers.put(itemName, this);
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletionStage<Void> unsubscribe() {
+            bandManagers.remove(itemName);
+            this.listener = null;
             room.killBandChecker(itemName);
+            return CompletableFuture.completedFuture(null);
         }
     }
 
@@ -142,20 +197,22 @@ public class RoomBallAdapter implements SmartDataProvider, Publisher {
 
         try {
 
-            if ( listener == null ) {
-                return ;
-            }
-            if (playerListHandle == null) {
+            PlayersListItemManager manager = playerListManager;
+            if (manager == null) {
                 return;
             }
-
-            if (!playerListSubscribed) {
+            ItemListener listener = manager.listener;
+            if (listener == null) {
                 return;
             }
 
             logger.debug("Update list " + ITEM_NAME_PLAYERS_LIST + " " + event.getCommand() + " " + event.getKey());
 
-            listener.smartUpdate(playerListHandle, event.getItemEvent(), event.isSnapshot());
+            if (event.isSnapshot()) {
+                listener.snapshot(event.getItemEvent(), null);
+            } else {
+                listener.update(event.getItemEvent());
+            }
 
         } catch (Exception e) {
             logger.warn("Exception sending event.", e);
@@ -165,52 +222,33 @@ public class RoomBallAdapter implements SmartDataProvider, Publisher {
     @Override
     public void publishEOS() {
 
-        if (listener == null) {
+        PlayersListItemManager manager = playerListManager;
+        if (manager == null) {
             return;
         }
-        if (playerListHandle == null) {
+        ItemListener listener = manager.listener;
+        if (listener == null) {
             return;
         }
 
         // call the update on the listener;
         // in case the listener has just been detached,
         // the listener should detect the case
-        listener.smartEndOfSnapshot(playerListHandle);
+        listener.endOfSnapshot();
     }
 
     @Override
     public void postBandwith(String userName, Map<String, String> itemEvent) {
+        BandwidthItemManager manager = bandManagers.get(ITEM_NAME_PREFIX_BAND + userName);
+        if (manager == null) {
+            return;
+        }
+        ItemListener listener = manager.listener;
         if (listener == null) {
             return;
         }
 
-        listener.update(ITEM_NAME_PREFIX_BAND+userName, itemEvent, false);
-    }
-
-    // Private Methods ---------------------------------------------------------
-
-    @SuppressWarnings("rawtypes")
-    private Box2DRoom initRoom(Map params) {
-        
-        Box2DRoom room = Box2DRoom.getInstance();
-        
-        if (room == null) {
-            return null;
-        }
-        
-        room.setPublisher(this);
-
-        if (params.containsKey(CFG_PARAM_FRAME_RATE)) {
-            logger.debug("frameRate configured: " + params.get(CFG_PARAM_FRAME_RATE));
-            room.setFrameRate(new Integer((String)params.get(CFG_PARAM_FRAME_RATE)).intValue());
-        }
-
-        if (params.containsKey(CFG_PARAM_STEPS_PER_FRAME)) {
-            logger.debug("Steps per Frame configured: " + params.get(CFG_PARAM_STEPS_PER_FRAME));
-            room.setStepsPerFrame(new Integer((String)params.get(CFG_PARAM_STEPS_PER_FRAME)).intValue());
-        }
-
-        return room;
+        listener.update(itemEvent);
     }
 
 }

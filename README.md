@@ -21,12 +21,12 @@ The project is comprised of source code and a deployment example.
 
 #### Java Data Adapter and MetaData Adapter
 
-A Java Adapter implementing both the [SmartDataProvider](https://lightstreamer.com/api/ls-adapter-inprocess/latest/com/lightstreamer/interfaces/data/SmartDataProvider.html) interface and the [MetadataProviderAdapter](https://lightstreamer.com/api/ls-adapter-inprocess/latest/com/lightstreamer/interfaces/metadata/MetadataProviderAdapter.html) interface, to inject data into Lightstreamer server with real-time information about the movement of every player in the room. The adapter accepts also message submission for the chat room.<br>
+A Java Adapter implementing both the `DataAdapter` interface and the `MetadataAdapter` interface, to inject data into Lightstreamer server with real-time information about the movement of every player in the room. The adapter accepts also message submission for the chat room.<br>
 The adapter receives input commands from Lightstreamer server, which forwards messages arrived from clients to the adapter in relation to:
 * Movement commands;
 * Changing last message for the player.
 
-The Metadata Adapter inherits from the reusable [LiteralBasedProvider](https://github.com/Lightstreamer/Lightstreamer-lib-adapter-java-inprocess#literalbasedprovider-metadata-adapter) and just adds a simple support for message submission. It should not be used as a reference, as no guaranteed delivery and no clustering support is shown.
+The Metadata Adapter implements `MetadataAdapter` directly and just adds a simple support for message submission. It should not be used as a reference, as no guaranteed delivery and no clustering support is shown.
 
 <!-- END DESCRIPTION lightstreamer-example-roomball-adapter-java -->
 
@@ -44,6 +44,9 @@ The `adapters.xml` file for the *Room-Ball Demo*, should look like:
 
     <metadata_provider>
         <adapter_class>com.lightstreamer.examples.roomball_demo.adapters.RoomBallMetaAdapter</adapter_class>
+
+        <!-- Ensure compatibility with old versions of the demo Clients. -->
+        <support_LiteralBased_subscriptions>Y</support_LiteralBased_subscriptions>
   
         <!--
           TCP port on which Sun/Oracle's JMXMP connector will be
@@ -77,8 +80,6 @@ The `adapters.xml` file for the *Room-Ball Demo*, should look like:
     </data_provider>
 </adapters_conf>
 ```
-Note that the parameter `<metadata_adapter_initialised_first>` is mandatory to be set to Y to allow proper initialization of Metadata and Data Adapters respectively.<br>
-
 <i>NOTE: not all configuration options of an Adapter Set are exposed by the file suggested above. 
 You can easily expand your configurations using the generic template, see the [Java In-Process Adapter Interface Project](https://github.com/Lightstreamer/Lightstreamer-lib-adapter-java-inprocess#configuration) for details.</i><br>
 <br>
@@ -120,14 +121,14 @@ Assuming Maven is installed and available in your path you can build the demo by
 
 ### Related Projects
 
-* [LiteralBasedProvider Metadata Adapter](https://github.com/Lightstreamer/Lightstreamer-lib-adapter-java-inprocess#literalbasedprovider-metadata-adapter)
 * [Lightstreamer - 3D World Demo - Java Adapter](https://github.com/Lightstreamer/Lightstreamer-example-3DWorld-adapter-java)
 * [Lightstreamer - 3D World Demo - Three.js Client](https://github.com/Lightstreamer/Lightstreamer-example-3DWorld-client-javascript)
 
 <!-- END RELATED_ENTRIES -->
 ## Lightstreamer Compatibility Notes
 
-- Compatible with Lightstreamer SDK for Java In-Process Adapters since version 8.0.
+- Compatible with Lightstreamer SDK for Java In-Process Adapters since version 9.0.
+- For a version of this example compatible with Lightstreamer SDK for Java In-Process Adapters versions 8.x, please refer to [this tag](https://github.com/Lightstreamer/Lightstreamer-example-RoomBall-adapter-java/tree/XXXXXXXXXXXXXXXXXXXXX).
 - For a version of this example compatible with Lightstreamer SDK for Java Adapters versions 7.4.x, please refer to [this tag](https://github.com/Lightstreamer/Lightstreamer-example-RoomBall-adapter-java/tree/last_for_interface_7.4.x).
 - For a version of this example compatible with Lightstreamer SDK for Java Adapters versions 7.0 to 7.3, please refer to [this tag](https://github.com/Lightstreamer/Lightstreamer-example-RoomBall-adapter-java/tree/last_for_interface_7.3.x).
 - For a version of this example compatible with Lightstreamer SDK for Java Adapters version 6.0, please refer to [this tag](https://github.com/Lightstreamer/Lightstreamer-example-RoomBall-adapter-java/tree/pre_mvn).

@@ -85,18 +85,18 @@ public class Box2DRoom implements Room {
 
     private static final int BASE_RATE = 10;
 
-    private double factorWorld;
+    private volatile double factorWorld;
 
-    private int frameRate;
+    private volatile int frameRate;
 
-    private float timeStep;
+    private volatile float timeStep;
 
     private static final int DEFAULT_STEPS_PER_FRAME = 1;
     private static final int DEFAULT_FRAME_RATE = 10;
     private static final int velocityIterations = 6;
     private static final int positionIterations = 2;
 
-    private int stepsPerFrame = DEFAULT_STEPS_PER_FRAME;
+    private volatile int stepsPerFrame = DEFAULT_STEPS_PER_FRAME;
 
     private int stepCounter = 0;
 
